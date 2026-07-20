@@ -714,24 +714,39 @@ class ConfirmDeleteScreen(ModalScreen):
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
         bin_mode = app.cfg.cleanup.use_recycle_bin
         dry = app.cfg.cleanup.dry_run
-        mode = "DRY RUN — nothing will be deleted" if dry else (
-            "Recycle Bin (recoverable)" if bin_mode else "[red]PERMANENT delete[/red]"
-        )
+        if dry:
+            mode = "[b]Dry run[/b] — nothing will actually be deleted"
+        elif bin_mode:
+            mode = "[b $success]Recycle Bin[/] — recoverable"
+        else:
+            mode = "[b $error]PERMANENT delete[/] — not recoverable"
+
         with Grid(id="confirm-dialog"):
-            yield Label(f"[b]Delete {len(self.paths)} item(s) — {human_size(self.total_bytes)}?[/b]", id="confirm-title")
-            yield Label(f"Method: {mode}", id="confirm-mode")
+            yield Label(
+                f"Delete [b]{len(self.paths)}[/b] item(s) · "
+                f"[b]{human_size(self.total_bytes)}[/b] to reclaim",
+                id="confirm-title",
+            )
+            yield Label(mode, id="confirm-mode")
+            yield Label("[dim]These items will be removed:[/dim]", id="confirm-list-label")
             with VerticalScroll(id="confirm-list"):
-                for p in self.paths[:50]:
-                    yield Static(f"• {p}")
-                if len(self.paths) > 50:
-                    yield Static(f"…and {len(self.paths) - 50} more")
+                for p in self.paths[:200]:
+                    yield Static(f"  • {p}")
+                if len(self.paths) > 200:
+                    yield Static(f"  [dim]…and {len(self.paths) - 200} more[/dim]")
+            # Progress row (hidden until deletion starts).
+            yield ProgressBar(total=len(self.paths), id="delete-progress", show_eta=False)
             if not bin_mode and not dry:
-                yield Label("Type DELETE to confirm permanent removal:")
+                yield Label("Type [b]DELETE[/b] to confirm permanent removal:", id="confirm-prompt")
                 yield Input(id="confirm-input", placeholder="DELETE")
             with Horizontal(id="confirm-buttons"):
                 yield Button("Confirm", variant="error", id="confirm-yes")
                 yield Button("Cancel", id="confirm-no")
             yield Static("", id="confirm-status")
+
+    def on_mount(self) -> None:
+        # Progress bar is only meaningful during deletion — hide it up front.
+        self.query_one("#delete-progress", ProgressBar).display = False
 
     @on(Button.Pressed, "#confirm-no")
     def cancel(self) -> None:
@@ -746,21 +761,42 @@ class ConfirmDeleteScreen(ModalScreen):
         if not app.cfg.cleanup.use_recycle_bin and not app.cfg.cleanup.dry_run:
             typed = self.query_one("#confirm-input", Input).value.strip()
             if typed != "DELETE":
-                self.query_one("#confirm-status", Static).update("[red]Type DELETE to confirm.[/red]")
+                self.query_one("#confirm-status", Static).update("[$error]Type DELETE to confirm.[/]")
                 return
-        self.query_one("#confirm-status", Static).update("Deleting…")
+        # Enter delete mode: reveal progress, lock the buttons so nothing double-fires.
+        self.query_one("#confirm-yes", Button).disabled = True
+        self.query_one("#confirm-no", Button).disabled = True
+        bar = self.query_one("#delete-progress", ProgressBar)
+        bar.display = True
+        bar.update(total=len(self.paths), progress=0)
+        self.query_one("#confirm-status", Static).update(f"Deleting 0/{len(self.paths)}…")
         self.do_delete()
 
     @work(thread=True, exclusive=True)
     def do_delete(self) -> None:
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
+        freed = 0
+
+        def on_progress(done: int, total: int, r) -> None:
+            nonlocal freed
+            if r.ok:
+                freed += r.freed_bytes
+            app.call_from_thread(self._show_delete_progress, done, total, freed)
+
         results = delete_many(
             self.paths,
             use_recycle_bin=app.cfg.cleanup.use_recycle_bin,
             dry_run=app.cfg.cleanup.dry_run,
+            on_progress=on_progress,
         )
         deleted = [r.path for r in results if r.ok]
         app.call_from_thread(self.dismiss, deleted)
+
+    def _show_delete_progress(self, done: int, total: int, freed: int) -> None:
+        self.query_one("#delete-progress", ProgressBar).update(progress=done)
+        self.query_one("#confirm-status", Static).update(
+            f"Deleting [b]{done}/{total}[/b] · [b]{human_size(freed)}[/b] freed…"
+        )
 
 
 # Friendlier display names for special key identifiers used in BINDINGS.

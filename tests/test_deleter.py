@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import os
 
-from ultimate_sacrifice.cleanup.deleter import delete_path, is_drive_root, is_guarded
+from ultimate_sacrifice.cleanup.deleter import (
+    delete_many,
+    delete_path,
+    is_drive_root,
+    is_guarded,
+)
 
 
 def test_drive_root_is_guarded():
@@ -142,3 +147,21 @@ def test_missing_path_reports_skipped(tmp_path):
     res = delete_path(str(tmp_path / "nope"), dry_run=True)
     assert not res.ok
     assert "no longer exists" in res.error
+
+
+def test_delete_many_reports_progress(tmp_path):
+    files = []
+    for i in range(3):
+        f = tmp_path / f"f{i}.bin"
+        f.write_bytes(b"\0" * 1024)
+        files.append(str(f))
+
+    seen = []
+    results = delete_many(
+        files, dry_run=True, on_progress=lambda done, total, r: seen.append((done, total, r.path))
+    )
+    assert len(results) == 3
+    # Progress fires once per item, in order, with a stable total.
+    assert [s[0] for s in seen] == [1, 2, 3]
+    assert all(s[1] == 3 for s in seen)
+    assert [s[2] for s in seen] == files

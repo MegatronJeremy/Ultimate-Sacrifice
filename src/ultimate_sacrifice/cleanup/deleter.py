@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from os.path import abspath, normcase, normpath
 
@@ -149,9 +150,23 @@ def delete_path(path: str, *, use_recycle_bin: bool = True, dry_run: bool = Fals
 
 
 def delete_many(
-    paths: list[str], *, use_recycle_bin: bool = True, dry_run: bool = False
+    paths: list[str],
+    *,
+    use_recycle_bin: bool = True,
+    dry_run: bool = False,
+    on_progress: "Callable[[int, int, DeleteResult], None] | None" = None,
 ) -> list[DeleteResult]:
-    return [
-        delete_path(p, use_recycle_bin=use_recycle_bin, dry_run=dry_run)
-        for p in paths
-    ]
+    """Delete each path in turn, returning per-item results.
+
+    ``on_progress(done, total, result)`` is called after each item (if given) so a UI
+    can show live deletion progress. It runs on the calling thread — callers that need
+    to marshal back to a UI thread should do so inside the callback.
+    """
+    total = len(paths)
+    results: list[DeleteResult] = []
+    for i, p in enumerate(paths, start=1):
+        r = delete_path(p, use_recycle_bin=use_recycle_bin, dry_run=dry_run)
+        results.append(r)
+        if on_progress is not None:
+            on_progress(i, total, r)
+    return results

@@ -129,10 +129,11 @@ Footer {
 /* ---- Confirm-delete modal ---- */
 #confirm-dialog {
     grid-size: 1;
-    grid-rows: auto auto 1fr auto auto auto;
-    padding: 1 2;
-    width: 90;
-    max-width: 100%;
+    grid-gutter: 1;
+    padding: 2 4;
+    width: 76%;
+    min-width: 70;
+    max-width: 120;
     height: auto;
     max-height: 90%;
     border: heavy $error;
@@ -141,24 +142,40 @@ Footer {
 #confirm-title {
     color: $primary;
     text-style: bold;
+    width: 100%;
+    content-align: center middle;
 }
 #confirm-mode {
     color: $foreground;
-    margin-bottom: 1;
+    width: 100%;
+    content-align: center middle;
+}
+#confirm-list-label {
+    color: $secondary;
 }
 #confirm-list {
-    height: 1fr;
-    min-height: 5;
-    max-height: 15;
+    height: auto;
+    min-height: 6;
+    max-height: 16;
+    padding: 1 2;
     border: round $secondary;
     background: $background;
 }
+#delete-progress {
+    width: 100%;
+}
+#confirm-prompt {
+    color: $foreground;
+}
 #confirm-buttons {
     height: auto;
-    margin-top: 1;
+    align-horizontal: right;
 }
 #confirm-buttons Button {
-    margin-right: 2;
+    margin-left: 2;
+}
+#confirm-status {
+    color: $foreground;
 }
 
 /* ---- Help overlay ---- */
