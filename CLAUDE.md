@@ -82,7 +82,7 @@ src/ultimate_sacrifice/
   config.py         # TOML -> dataclasses (ScanConfig / AIConfig / CleanupConfig); all fields defaulted
   scanner/
     model.py        # ScanNode / ScanProgress dataclasses
-    walker.py       # Scanner: cancellable os.scandir walk, bottom-up size aggregation
+    walker.py       # Scanner: cancellable os.scandir walk, bottom-up aggregation; normalize_root
     heuristics.py   # PURE functions: is_temp_path, is_build_artifact, staleness_days, category, junk_score
   ai/
     base.py         # AIProvider Protocol; AssessRequest/Assessment; fallback_assessment
@@ -133,6 +133,12 @@ item count + total size + selection totals, refreshed on scan/selection/drill.
 ## Safety (deletion is the one irreversible action)
 
 All deletion is centralized in `cleanup/deleter.py` behind guards; the UI must never bypass them.
+
+**Windows drive-letter trap (learned the hard way).** `os.path.abspath("C:")` returns the *current
+directory on drive C*, NOT the drive root — a bare `C:` scanned the project folder, not the disk.
+Always route a scan root through `walker.normalize_root`, which maps a bare drive letter (`C:`) to
+the drive root (`C:\`). The scanner, the scan-config screen, and `--advise` all use it; never call
+`abspath` on a user-supplied root directly.
 
 - **Recycle Bin by default** (`send2trash`, recoverable). Permanent delete is opt-in and, in the UI,
   requires typing `DELETE` to confirm.

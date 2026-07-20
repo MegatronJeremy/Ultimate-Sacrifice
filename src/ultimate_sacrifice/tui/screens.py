@@ -29,7 +29,7 @@ from ..cleanup.deleter import delete_many, is_guarded
 from ..config import human_size
 from ..scanner import heuristics
 from ..scanner.model import ScanNode, ScanProgress
-from ..scanner.walker import Scanner
+from ..scanner.walker import Scanner, normalize_root
 from .theme import BANNER, GOLD as _GOLD, SELECTED_BG as _SELECTED_BG, TAGLINE, verdict_style
 
 if TYPE_CHECKING:
@@ -104,8 +104,10 @@ class ScanConfigScreen(Screen):
     @on(Button.Pressed, "#scan-btn")
     def start_scan(self) -> None:
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
-        root = self.query_one("#root-input", Input).value.strip()
-        if not root or not os.path.isdir(os.path.expanduser(root)):
+        raw = self.query_one("#root-input", Input).value.strip()
+        # Fix the bare-drive-letter trap: "C:" means the cwd on C, not the drive root.
+        root = normalize_root(raw) if raw else raw
+        if not root or not os.path.isdir(root):
             self.query_one("#config-status", Static).update("[red]Path is not a folder.[/red]")
             return
         try:

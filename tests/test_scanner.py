@@ -5,7 +5,25 @@ from __future__ import annotations
 import os
 
 from ultimate_sacrifice.scanner.model import Kind
-from ultimate_sacrifice.scanner.walker import Scanner
+from ultimate_sacrifice.scanner.walker import Scanner, normalize_root
+
+
+def test_normalize_root_bare_drive_letter():
+    # The bug: "C:" resolves to the cwd on C, not the drive root. normalize_root
+    # must map a bare drive letter to the actual root.
+    assert normalize_root("C:") == "C:\\"
+    assert normalize_root("c:") == "c:\\"
+    assert normalize_root("D:") == "D:\\"
+    # Whitespace tolerated.
+    assert normalize_root("  C:  ") == "C:\\"
+
+
+def test_normalize_root_passes_through_real_paths(tmp_path):
+    p = str(tmp_path)
+    assert normalize_root(p) == os.path.abspath(p)
+    # An explicit drive root stays a drive root.
+    assert normalize_root("C:\\") == os.path.abspath("C:\\")
+    assert normalize_root("C:/") == os.path.abspath("C:/")
 
 
 def _write(path: str, size: int) -> None:

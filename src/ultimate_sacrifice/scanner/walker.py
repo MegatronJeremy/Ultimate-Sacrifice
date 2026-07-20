@@ -18,6 +18,21 @@ from .model import Kind, ScanNode, ScanProgress
 ProgressCb = Callable[[ScanProgress], None]
 
 
+def normalize_root(root: str) -> str:
+    """Resolve a scan root to an absolute path, fixing the bare-drive-letter trap.
+
+    On Windows ``C:`` means "the current directory on drive C", NOT the drive root —
+    so ``os.path.abspath("C:")`` returns the cwd, silently scanning the wrong place.
+    A bare drive letter (``C:`` / ``C:``+spaces) is treated as the drive root (``C:\\``).
+    Everything else goes through the usual expanduser/abspath.
+    """
+    root = os.path.expanduser(root.strip())
+    # Bare drive letter like "C:" or "c:" (len 2, second char ':') -> drive root.
+    if len(root) == 2 and root[1] == ":" and root[0].isalpha():
+        return root + "\\"
+    return os.path.abspath(root)
+
+
 def deduplicate_nested(nodes: list[ScanNode]) -> list[ScanNode]:
     """Drop candidates whose bytes are already represented by an ancestor candidate.
 
@@ -96,7 +111,7 @@ class Scanner:
             self._progress_cb(self._progress)
 
     def scan(self, root: str) -> list[ScanNode]:
-        root = os.path.abspath(os.path.expanduser(root))
+        root = normalize_root(root)
         now = time.time()
         self._started_at = now
         candidates: list[ScanNode] = []

@@ -314,9 +314,10 @@ def _run_advise(cfg: Config, use_ai: bool = True) -> None:
     from .ai import build_provider, provider_identity  # noqa: F401
     from .analysis import analyze_with_ai
     from .analysis.report import render_plan
-    from .scanner.walker import Scanner
+    from .scanner.walker import Scanner, normalize_root
 
-    root = cfg.scan.root
+    # Fix the bare-drive-letter trap ("C:" == cwd on C, not the drive root).
+    root = normalize_root(cfg.scan.root)
     print(f"Scanning {root} (min {cfg.scan.min_size_mb} MB)… this walks the whole tree.", flush=True)
     scanner = Scanner(min_size_bytes=cfg.scan.min_size_bytes, top_n=100000)
     nodes = scanner.scan(root)
