@@ -40,6 +40,28 @@ Every provider builds the **same** JSON-in/JSON-out prompt (`ai/prompt.py`) and 
 tolerant parser. **Fail loud, degrade gracefully:** if the selected provider is unavailable
 (`available()` false) or returns unparseable output, the app says so and falls back to a
 deterministic **heuristic-only** verdict (`base.fallback_assessment`) rather than blanking the row.
+Providers also expose `complete_text(prompt)` for free-form generation (the advisor narrative),
+alongside the structured `assess_one`.
+
+## Disk Advisor (map + prioritized plan)
+
+A flat list of large items doesn't help on a multi-TB disk. The **advisor** (`analysis/`) aggregates
+a scan into a *disk map* (where the reclaimable space is, by class) and a *ranked cleanup plan*
+(biggest **safe** wins first). It's **hybrid**: deterministic grouping/ranking always runs and is
+fully explainable; the AI only *annotates* with a why/how/risk narrative when reachable, degrading to
+rules-only otherwise. The AI never gates safety — every deletion still flows through `is_guarded` +
+the confirm dialog.
+
+- `cleanup_class(node)` buckets into action classes (`build-output`, `dependency-dirs`, `caches`,
+  `installers-archives`, `large-loose-files`); build/dep dirs sub-group **per project**
+  (`project_root_of`) so "UE builds across N projects" reads as distinct actionable lines.
+- `rank_groups` priority = size(GB) × safety-weight × staleness-bonus — safe+big+stale ranks first.
+- `analyze()` = pure plan; `analyze_with_ai()` adds the narrative. Only the **group summary** goes to
+  the model (labels/sizes/safety), never the file list — cheap, bounded, and `<data>`-fenced like the
+  assessment prompt (issue #9).
+- Headless: `python -m ultimate_sacrifice --advise [--root PATH] [--no-ai]` scans, prints the map +
+  plan (via `analysis/report.render_plan`), and exits — no TUI, deletes nothing. `_safe_print` guards
+  against legacy Windows-console (cp1252) encode errors on the AI narrative.
 
 ## Layout
 
@@ -58,9 +80,14 @@ src/ultimate_sacrifice/
     claude_cli.py   # subprocess provider (your Claude account, no key)
     anthropic_api.py# API-key provider (optional)
     assessor.py     # bounded-concurrency fan-out over nodes; node_to_request
-    __init__.py     # build_provider(name, config) factory
+    __init__.py     # build_provider(name, config) factory; providers also expose complete_text()
+  analysis/         # Disk Advisor — turns a flat scan into a map + prioritized plan
+    advisor.py      # PURE: cleanup_class, project_root_of, group_candidates, rank_groups, analyze
+    advisor_prompt.py # build_advice_prompt (group summary, <data>-fenced) + narrate (async, best-effort)
+    report.py       # render_plan -> terminal text (disk map bars + ranked actions + narrative)
+    __init__.py     # analyze_with_ai (hybrid: rules + optional AI narrative)
   cleanup/
-    deleter.py      # is_guarded / delete_path / delete_many: Recycle Bin, permanent, dry-run
+    deleter.py      # is_guarded / delete_path / delete_many(on_progress=): Recycle Bin, permanent, dry-run
   tui/
     screens.py      # ScanConfigScreen, ResultsScreen, ConfirmDeleteScreen, HelpScreen
     theme.py        # Gold & Obsidian Textual theme, ASCII banner, verdict_style

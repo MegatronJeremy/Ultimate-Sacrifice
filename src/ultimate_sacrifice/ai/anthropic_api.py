@@ -58,3 +58,27 @@ class AnthropicProvider:
         except httpx.HTTPError as exc:
             return fallback_assessment(request, f"Anthropic API request failed ({exc.__class__.__name__}).")
         return parse_response(text, request)
+
+    async def complete_text(self, prompt: str) -> str:
+        """Free-form text completion (used for the advisor narrative). '' on failure."""
+        if not self.api_key:
+            return ""
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": _API_VERSION,
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "temperature": 0.2,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(_API_URL, headers=headers, json=payload)
+                resp.raise_for_status()
+                blocks = resp.json().get("content", [])
+                return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        except httpx.HTTPError:
+            return ""

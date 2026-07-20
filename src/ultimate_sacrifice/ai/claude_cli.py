@@ -60,6 +60,22 @@ class ClaudeCliProvider:
         content = _unwrap_cli_json(raw)
         return parse_response(content, request)
 
+    async def complete_text(self, prompt: str) -> str:
+        """Free-form text completion (used for the advisor narrative). '' on failure."""
+        if self._exe is None:
+            return ""
+        args = [self._exe, "-p", prompt, "--output-format", "json", "--model", self.model]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
+        except (asyncio.TimeoutError, OSError):
+            return ""
+        if proc.returncode != 0:
+            return ""
+        return _unwrap_cli_json(stdout.decode("utf-8", "replace"))
+
 
 def _unwrap_cli_json(raw: str) -> str:
     """Extract the assistant text from the CLI's JSON envelope, tolerating plain text."""

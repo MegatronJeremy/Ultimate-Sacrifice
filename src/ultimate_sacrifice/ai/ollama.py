@@ -56,3 +56,19 @@ class OllamaProvider:
         except httpx.HTTPError as exc:
             return fallback_assessment(request, f"Ollama request failed ({exc.__class__.__name__}).")
         return parse_response(content, request)
+
+    async def complete_text(self, prompt: str) -> str:
+        """Free-form text completion (used for the advisor narrative). '' on failure."""
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(f"{self.host}/api/chat", json=payload)
+                resp.raise_for_status()
+                return resp.json().get("message", {}).get("content", "")
+        except httpx.HTTPError:
+            return ""
