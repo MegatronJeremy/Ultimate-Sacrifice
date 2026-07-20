@@ -1,0 +1,40 @@
+# Ultimate-Sacrifice configuration.
+# Copy this file to `config.toml` and edit. All fields are optional; the values
+# shown here are the built-in defaults, so an empty config.toml behaves identically.
+
+[scan]
+# Default root path offered on the scan screen. "~" expands to your home directory.
+root = "~"
+# Only files/folders at least this large (in MB) become cleanup candidates.
+min_size_mb = 100
+# Cap on how many largest candidates are shown / sent to the AI.
+top_n = 200
+
+[ai]
+# Which provider to use: "ollama" (local, default), "claude_cli" (your logged-in
+# Claude account, no API key), or "anthropic" (needs ANTHROPIC_API_KEY).
+provider = "ollama"
+
+# Model per provider. Leave a provider's model blank to use its default.
+ollama_model = "qwen3:8b"
+ollama_host = "http://localhost:11434"
+claude_model = "sonnet"
+anthropic_model = "claude-sonnet-5"
+
+# Max concurrent AI requests during assessment.
+concurrency = 4
+
+[cleanup]
+# When true, deletions go to the Recycle Bin (recoverable). When false, deletes
+# are permanent. The UI can override this per run.
+use_recycle_bin = true
+# When true, nothing is actually deleted; the app only reports what it would do.
+dry_run = false
+
+[cache]
+# Reuse AI verdicts across runs for files whose (path, size, mtime) is unchanged,
+# so a re-scan only asks the AI about new or changed files. Disable with --no-cache.
+enabled = true
+# Where to store the cache. Leave blank to use a per-user cache directory
+# (e.g. %LOCALAPPDATA%\ultimate-sacrifice\assessments.json on Windows).
+path = ""

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config (user's real config with keys/paths)
+config.toml
+
+# IDE / OS
+.vs/
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
+us_smoke_*/

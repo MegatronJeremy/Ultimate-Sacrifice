@@ -1,0 +1,141 @@
+"""Safe deletion with hard path guards, Recycle-Bin default, and dry-run.
+
+Deletion is the one irreversible action this app takes, so it is centralized here
+behind explicit guards. ``is_guarded`` refuses OS/program/critical paths regardless
+of any AI recommendation; the UI must never bypass it.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from dataclasses import dataclass
+from os.path import abspath, normcase, normpath
+
+from send2trash import send2trash
+
+# Path prefixes we never delete, even if the AI says so.
+_GUARDED_PREFIXES = (
+    "c:\\windows",
+    "c:\\program files",
+    "c:\\program files (x86)",
+    "c:\\programdata",
+    "c:\\$recycle.bin",
+    "c:\\system volume information",
+)
+
+# OS-managed swap / hibernation files — deleting these breaks or destabilizes Windows.
+# Matched by basename regardless of which drive/location they live on.
+_GUARDED_FILENAMES = frozenset(
+    ("pagefile.sys", "hiberfil.sys", "swapfile.sys")
+)
+
+# Virtual-disk / VM images — a single file that IS an entire filesystem (WSL, Hyper-V,
+# VirtualBox, VMware). Recycling one silently wipes everything inside it.
+_GUARDED_EXTENSIONS = frozenset(
+    (".vhdx", ".vhd", ".vmdk", ".vdi", ".avhd", ".avhdx")
+)
+
+
+@dataclass(slots=True)
+class DeleteResult:
+    path: str
+    ok: bool
+    freed_bytes: int
+    method: str  # "recycle-bin" | "permanent" | "dry-run" | "skipped"
+    error: str = ""
+
+
+def _norm(path: str) -> str:
+    return normcase(normpath(abspath(os.path.expanduser(path))))
+
+
+def is_drive_root(path: str) -> bool:
+    n = _norm(path)
+    # e.g. "c:\" — a drive letter, colon, single separator.
+    return len(n) <= 3 and n[1:2] == ":"
+
+
+def is_guarded(path: str) -> tuple[bool, str]:
+    """Return (guarded, reason). Guarded paths must never be deleted."""
+    n = _norm(path)
+    if is_drive_root(n):
+        return True, "refusing to delete a drive root"
+    base = os.path.basename(n)
+    if base in _GUARDED_FILENAMES:
+        return True, f"refusing to delete an OS swap/hibernation file ({base})"
+    if os.path.splitext(base)[1] in _GUARDED_EXTENSIONS:
+        return True, "refusing to delete a virtual-disk image (contains an entire filesystem)"
+    for pref in _GUARDED_PREFIXES:
+        if n == pref or n.startswith(pref + "\\"):
+            return True, f"refusing to delete a protected system path ({pref})"
+    # Refuse to delete the app's own install/source directory.
+    try:
+        app_root = _norm(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        if n == app_root or n.startswith(app_root + "\\") or app_root.startswith(n + "\\"):
+            return True, "refusing to delete the running application's own directory"
+    except OSError:
+        pass
+    # Refuse whole directories that aren't recognized junk — a big "container" folder
+    # (C:\Dev, a user's Videos, the scan root) is valuable because of what it holds.
+    # Recognized-disposable dirs (node_modules, build/, Temp, caches) fall through as allowed.
+    from ..scanner.heuristics import is_build_artifact, is_temp_path
+
+    if os.path.isdir(path) and not is_build_artifact(path) and not is_temp_path(path):
+        return True, "refusing to delete a directory not recognized as junk (looks like a container)"
+    return False, ""
+
+
+def _size_on_disk(path: str) -> int:
+    if os.path.isfile(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    total = 0
+    for root, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def delete_path(path: str, *, use_recycle_bin: bool = True, dry_run: bool = False) -> DeleteResult:
+    """Delete one path. Guards first, then dry-run, then Recycle Bin / permanent."""
+    guarded, reason = is_guarded(path)
+    if guarded:
+        return DeleteResult(path, ok=False, freed_bytes=0, method="skipped", error=reason)
+
+    if not os.path.exists(path):
+        return DeleteResult(path, ok=False, freed_bytes=0, method="skipped", error="path no longer exists")
+
+    freed = _size_on_disk(path)
+
+    if dry_run:
+        return DeleteResult(path, ok=True, freed_bytes=freed, method="dry-run")
+
+    try:
+        if use_recycle_bin:
+            send2trash(path)
+            method = "recycle-bin"
+        else:
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            method = "permanent"
+    except Exception as exc:  # noqa: BLE001 - send2trash raises library-specific errors
+        return DeleteResult(path, ok=False, freed_bytes=0, method="error", error=str(exc)[:200])
+
+    return DeleteResult(path, ok=True, freed_bytes=freed, method=method)
+
+
+def delete_many(
+    paths: list[str], *, use_recycle_bin: bool = True, dry_run: bool = False
+) -> list[DeleteResult]:
+    return [
+        delete_path(p, use_recycle_bin=use_recycle_bin, dry_run=dry_run)
+        for p in paths
+    ]

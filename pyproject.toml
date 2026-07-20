@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ultimate-sacrifice"
+version = "0.1.0"
+description = "AI-accelerated, context-rich disk scanner and cleanup TUI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Unlicense" }
+authors = [{ name = "vudjordj" }]
+dependencies = [
+    "textual>=0.79",
+    "httpx>=0.27",
+    "send2trash>=1.8",
+    "platformdirs>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+ultimate-sacrifice = "ultimate_sacrifice.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
