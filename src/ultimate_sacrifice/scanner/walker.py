@@ -101,6 +101,9 @@ class Scanner:
         self.cancel = False
         self._progress = ScanProgress()
         self._started_at = 0.0
+        # True if the candidate list was cut to top_n (there were more qualifying items);
+        # lets the UI flag the reclaimable total as a floor rather than the exact figure.
+        self.truncated = False
 
     def _emit(self, force: bool = False) -> None:
         if self._progress_cb is None:
@@ -134,6 +137,7 @@ class Scanner:
         # Actionable items first (largest-first), context containers after (largest-first),
         # so the top_n cap can never hide real targets behind big-but-untouchable folders.
         candidates.sort(key=lambda n: (heuristics.is_container(n), -n.size))
+        self.truncated = len(candidates) > self.top_n
         return candidates[: self.top_n]
 
     def _walk(self, path: str, now: float, out: list[ScanNode]) -> int:

@@ -73,10 +73,21 @@ def test_sorted_largest_first_and_top_n(tmp_path):
     files = [n for n in nodes if n.kind is Kind.FILE]
     assert max(files, key=lambda n: n.size).path.endswith("b.bin")
 
-    # top_n truncates to the largest N nodes.
-    capped = Scanner(min_size_bytes=1024 * 1024, top_n=2).scan(root)
+    # top_n truncates to the largest N nodes, and flags that it did.
+    capped_scanner = Scanner(min_size_bytes=1024 * 1024, top_n=2)
+    capped = capped_scanner.scan(root)
     assert len(capped) == 2
     assert capped[0].size >= capped[1].size
+    assert capped_scanner.truncated is True
+
+
+def test_truncated_flag_false_when_under_cap(tmp_path):
+    root = str(tmp_path)
+    _write(os.path.join(root, "a.bin"), 3 * 1024 * 1024)
+    _write(os.path.join(root, "b.bin"), 2 * 1024 * 1024)
+    scanner = Scanner(min_size_bytes=1024 * 1024, top_n=1000)
+    scanner.scan(root)
+    assert scanner.truncated is False
 
 
 def test_cancel_stops_scan(tmp_path):

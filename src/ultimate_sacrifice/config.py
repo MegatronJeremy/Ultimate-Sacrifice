@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 class ScanConfig:
     root: str = "~"
     min_size_mb: int = 100
-    top_n: int = 200
+    # Max candidates kept for display/counting. Generous so the reclaimable total and
+    # disk map reflect the whole tail, not just the biggest few. This is cheap (local
+    # sort); the expensive AI step is bounded separately by ai.assess_top_n.
+    top_n: int = 5000
 
     @property
     def min_size_bytes(self) -> int:
@@ -26,6 +29,10 @@ class AIConfig:
     claude_model: str = "sonnet"
     anthropic_model: str = "claude-sonnet-5"
     concurrency: int = 4
+    # Bound the expensive AI step: assess at most this many of the largest un-assessed
+    # candidates per 'a' press (the rest keep their heuristic ranking). Decoupled from
+    # scan.top_n so the reclaimable total stays accurate without paying to assess it all.
+    assess_top_n: int = 300
 
 
 @dataclass(slots=True)
@@ -81,6 +88,7 @@ def load_config(path: str | None = None) -> Config:
         claude_model=ai_d.get("claude_model", AIConfig.claude_model),
         anthropic_model=ai_d.get("anthropic_model", AIConfig.anthropic_model),
         concurrency=int(ai_d.get("concurrency", AIConfig.concurrency)),
+        assess_top_n=int(ai_d.get("assess_top_n", AIConfig.assess_top_n)),
     )
     cleanup = CleanupConfig(
         use_recycle_bin=bool(clean_d.get("use_recycle_bin", CleanupConfig.use_recycle_bin)),

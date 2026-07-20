@@ -246,7 +246,9 @@ class ResultsScreen(Screen):
         self._scanner = scanner
         nodes = scanner.scan(root)
         self._scanning = False
-        app.call_from_thread(self._scan_done, nodes, scanner._progress.cancelled, preserve_all)
+        app.call_from_thread(
+            self._scan_done, nodes, scanner._progress.cancelled, preserve_all, scanner.truncated
+        )
 
     def action_cancel_scan(self) -> None:
         if self._scanning and self._scanner is not None:
@@ -265,7 +267,11 @@ class ResultsScreen(Screen):
         )
 
     def _scan_done(
-        self, nodes: list[ScanNode], cancelled: bool = False, preserve_all: bool = False
+        self,
+        nodes: list[ScanNode],
+        cancelled: bool = False,
+        preserve_all: bool = False,
+        truncated: bool = False,
     ) -> None:
         # On drill navigation we NARROW the view, so paths from other frames are absent
         # but still valid — don't drop their selections/verdicts. Only an explicit rescan
@@ -283,6 +289,10 @@ class ResultsScreen(Screen):
         cache_note = f" [dim]{restored} restored from cache.[/dim]" if restored else ""
         auto_note = f" [b]{auto}[/b] auto-selected." if auto else ""
         drop_note = f" [dim]{dropped} prior selection(s) dropped.[/dim]" if dropped else ""
+        # When the scan cap was hit there are MORE candidates than shown, so the total is a
+        # floor. Raise scan.top_n in config.toml to count more.
+        total_word = "at least " if truncated else ""
+        trunc_note = " [yellow](scan cap reached — raise scan.top_n for more)[/yellow]" if truncated else ""
         depth = len(self._scan_stack) - 1
         _, min_bytes = self._current_frame
         drill_note = (
@@ -290,7 +300,8 @@ class ResultsScreen(Screen):
             if depth > 0 else ""
         )
         self.query_one("#results-status", Static).update(
-            f"{cancel_note}{drill_note}[b]{len(nodes)}[/b] candidates, {human_size(total)} total."
+            f"{cancel_note}{drill_note}[b]{len(nodes)}[/b] candidates, "
+            f"{total_word}{human_size(total)} total.{trunc_note}"
             f"{cache_note}{auto_note}{drop_note} [b]enter[/b] a folder, [b]a[/b] assess, "
             f"[b]?[/b] keys."
         )
@@ -624,6 +635,14 @@ class ResultsScreen(Screen):
             )
             return
 
+        # Bound the expensive AI step: assess only the largest N un-assessed candidates
+        # (the reclaimable total/table already reflect the full set — this caps cost, not
+        # coverage). The rest keep their heuristic ranking; press 'a' again for the next N.
+        pending.sort(key=lambda n: -n.size)
+        assess_cap = max(1, app.cfg.ai.assess_top_n)
+        skipped = max(0, len(pending) - assess_cap)
+        pending = pending[:assess_cap]
+
         provider = build_provider(app.cfg.ai.provider, app.cfg.ai)
         if not await provider.available():
             self.query_one("#results-status", Static).update(
@@ -657,10 +676,14 @@ class ResultsScreen(Screen):
         n_del = sum(1 for a in self.assessments.values() if a.recommendation == "delete")
         sel_bytes = sum(n.size for n in self.nodes if n.path in self.selected)
         cache_note = f" ({cached} reused from cache)" if cached else ""
+        skip_note = (
+            f" [dim]{skipped} smaller items not yet assessed — press [b]a[/b] again.[/dim]"
+            if skipped else ""
+        )
         self.query_one("#results-status", Static).update(
             f"Assessment complete. {n_del} flagged for deletion{cache_note}. "
             f"[b]{auto} auto-selected[/b] ({human_size(sel_bytes)}) — review, adjust with "
-            f"[b]space[/b], then [b]d[/b] to delete."
+            f"[b]space[/b], then [b]d[/b] to delete.{skip_note}"
         )
 
     def action_delete(self) -> None:

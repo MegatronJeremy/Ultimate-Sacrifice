@@ -273,7 +273,13 @@ per-user cache dir (`config.resolved_cache_path`), never inside a scanned tree. 
 
 ## Deliberate simplifications (conscious subset of the real thing)
 
-- Assesses only the **top-N largest candidates**, not every file — bounds AI time/cost.
+- **Two independent caps** (split so the reclaimable total isn't throttled by the AI bound):
+  `scan.top_n` (default 5000) caps how many candidates are kept for **display/counting** — cheap
+  local sort, so the total + disk map reflect the whole tail; `Scanner.truncated` flags when even
+  that cap is hit (total shown as "at least X"). `ai.assess_top_n` (default 300) separately bounds
+  the **expensive AI step** — each `a` press assesses the largest N un-assessed items, and the
+  status notes how many smaller ones remain (press `a` again). `--advise` uses an effectively
+  unbounded scan cap (100000) for an exact figure.
 - No background file-watcher / incremental rescan (walk-skipping via the NTFS USN journal is the
   honest next step; the assessment cache above already removes the expensive redundant AI work).
 - Windows-oriented (Recycle Bin + path guards). The provider and heuristic layers are OS-agnostic,

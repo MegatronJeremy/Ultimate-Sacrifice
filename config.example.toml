@@ -7,8 +7,10 @@
 root = "~"
 # Only files/folders at least this large (in MB) become cleanup candidates.
 min_size_mb = 100
-# Cap on how many largest candidates are shown / sent to the AI.
-top_n = 200
+# Max candidates kept for display/counting. Generous, so the reclaimable total and
+# disk map reflect the whole tail (this is a cheap local sort). Raise it if a huge
+# disk reports "scan cap reached". The expensive AI step is bounded separately below.
+top_n = 5000
 
 [ai]
 # Which provider to use: "ollama" (local, default), "claude_cli" (your logged-in
@@ -23,6 +25,10 @@ anthropic_model = "claude-sonnet-5"
 
 # Max concurrent AI requests during assessment.
 concurrency = 4
+# Bound the expensive AI step: each time you press 'a', assess at most this many of the
+# largest un-assessed candidates (press 'a' again for the next batch). Decoupled from
+# scan.top_n so the reclaimable total stays accurate without paying to assess everything.
+assess_top_n = 300
 
 [cleanup]
 # When true, deletions go to the Recycle Bin (recoverable). When false, deletes
