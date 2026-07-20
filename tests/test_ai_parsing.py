@@ -28,6 +28,18 @@ def test_prompt_includes_metrics():
     assert "JSON" in p
 
 
+def test_prompt_directs_confident_delete_for_regenerable():
+    # The prompt must give explicit permission to confidently delete regenerable
+    # classes (issue #1) rather than defaulting everything to 'review'.
+    p = build_prompt(req())
+    low = p.lower()
+    assert "delete" in low
+    assert "regenerable" in low
+    # Names the concrete disposable categories the heuristics tag.
+    assert "build-artifact" in low
+    assert "temp-cache" in low
+
+
 def test_parse_clean_json():
     r = req()
     text = '{"recommendation": "delete", "confidence": 0.9, "reason": "regenerable deps"}'

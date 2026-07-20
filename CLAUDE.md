@@ -106,8 +106,14 @@ All deletion is centralized in `cleanup/deleter.py` behind guards; the UI must n
   (actionable vs container) so a deletable `node_modules` nested inside a protected container `C:\Dev`
   still surfaces. This runs before the `top_n` cut, so reported/selected/reclaimable sizes reflect
   **distinct** bytes — never double-counted. Pure string-prefix operation, no extra filesystem access.
-- The AI prompt itself is conservative: "when unsure, choose review, not delete"; never delete OS/
-  program paths or recently-edited source.
+- The AI prompt (`ai/prompt.py`) is **decisive on regenerable classes, cautious on the rest**: it
+  confidently `delete`s `build-artifact` (node_modules, build/, dist/, caches) and `temp-cache`
+  items — which regenerate from source or re-download and hold no unique data — while steering
+  `archive/installer`, media, Downloads, and recently-modified source to `review`/`keep`. Earlier
+  wording ("when unsure, choose review") made the model mark obvious junk as `review`, starving
+  auto-select (issue #1); the reframe fixed that without weakening the OS/program/recent-source
+  protections (those are also enforced independently by `is_guarded`, container rules, and the scan
+  root drop, so the prompt is the *soft* layer, never the only one).
 - **Auto-selection is deliberately narrow.** After assessment the results screen pre-ticks only
   items the AI marked `delete` with confidence ≥ `_AUTO_SELECT_CONFIDENCE` (0.85), and
   `_auto_select_confident` still skips any `is_guarded` path — so a stray high-confidence `delete`
