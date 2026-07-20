@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual import on, work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
@@ -124,21 +125,26 @@ class ScanConfigScreen(Screen):
 class ResultsScreen(Screen):
     """Second screen: scan results table + AI assessment + selection."""
 
+    # Footer shows only the core task-flow keys (show=True); secondary actions are
+    # hidden from the footer to keep it readable but still work and are listed in the
+    # `?` Help overlay (which renders every binding, shown or not). key_display fixes
+    # glyphs that would otherwise render oddly (Enter/Backspace) or crowd the label.
     BINDINGS = [
-        ("space", "toggle_row", "Select"),
-        ("a", "assess", "Assess with AI"),
-        ("A", "select_recommended", "Select all deletes"),
-        ("c", "clear_selection", "Clear"),
-        ("v", "invert_selection", "Invert"),
-        ("s", "cycle_sort", "Sort"),
-        ("f", "cycle_filter", "Filter"),
-        ("enter", "drill_in", "Drill into folder"),
-        ("backspace", "drill_up", "Drill up"),
-        ("d", "delete", "Delete selected"),
-        ("r", "rescan", "Rescan"),
-        ("x", "cancel_scan", "Cancel scan"),
-        ("question_mark", "help", "Help"),
-        ("escape", "back", "Back"),
+        Binding("space", "toggle_row", "Select", key_display="space"),
+        Binding("a", "assess", "Assess", key_display="a"),
+        Binding("d", "delete", "Delete", key_display="d"),
+        Binding("enter", "drill_in", "Drill in", key_display="enter"),
+        Binding("s", "cycle_sort", "Sort", key_display="s"),
+        Binding("f", "cycle_filter", "Filter", key_display="f"),
+        Binding("question_mark", "help", "Help", key_display="?"),
+        Binding("escape", "back", "Back", key_display="esc"),
+        # --- secondary: hidden from footer, still active, shown in ? Help ---
+        Binding("A", "select_recommended", "Select all deletes", show=False),
+        Binding("c", "clear_selection", "Clear selection", show=False),
+        Binding("v", "invert_selection", "Invert selection", show=False),
+        Binding("backspace", "drill_up", "Drill up", key_display="bksp", show=False),
+        Binding("r", "rescan", "Rescan", show=False),
+        Binding("x", "cancel_scan", "Cancel scan", show=False),
     ]
 
     def __init__(self) -> None:
@@ -160,6 +166,7 @@ class ResultsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical():
+            yield Static("", id="context-bar")
             yield Static("", id="breadcrumb")
             yield Static("Scanning…", id="results-status")
             yield ProgressBar(total=None, id="scan-progress", show_eta=False)
@@ -237,6 +244,7 @@ class ResultsScreen(Screen):
         restored = self._restore_from_cache()
         auto = self._auto_select_confident()  # tick confident deletes from cached verdicts
         self._rebuild_table()
+        self._update_context()
         total = sum(n.size for n in nodes)
         cancel_note = "[yellow]Scan cancelled — partial results.[/yellow] " if cancelled else ""
         cache_note = f" [dim]{restored} restored from cache.[/dim]" if restored else ""
@@ -266,6 +274,21 @@ class ResultsScreen(Screen):
         shown = parts if len(parts) <= 4 else ["…", *parts[-3:]]
         crumb.update(" › ".join(shown))
         crumb.display = True
+
+    def _update_context(self) -> None:
+        """Refresh the title/context bar: where we are + counts + selection totals."""
+        root = self._current_frame[0]
+        total = sum(n.size for n in self.nodes)
+        sel_bytes = sum(n.size for n in self.nodes if n.path in self.selected)
+        n_sel = len(self.selected)
+        sel_part = (
+            f"[$accent]{n_sel} selected · {human_size(sel_bytes)}[/]"
+            if n_sel else "[dim]nothing selected[/dim]"
+        )
+        self.query_one("#context-bar", Static).update(
+            f"[b]{root}[/b]\n"
+            f"{len(self.nodes)} items · {human_size(total)} · {sel_part}"
+        )
 
     def _reconcile_after_scan(self, nodes: list[ScanNode]) -> int:
         """Keep selections/verdicts that still apply to the fresh node set.
@@ -436,6 +459,7 @@ class ResultsScreen(Screen):
             f"showing [b]{shown}[/b]/{len(self.nodes)}  ·  selected [b]{len(self.selected)}[/b] "
             f"({human_size(sel_bytes)}). [b]?[/b] for keys."
         )
+        self._update_context()
 
     # ---- bulk selection -------------------------------------------------
 
@@ -500,6 +524,7 @@ class ResultsScreen(Screen):
                 return
             self.selected.add(path)
         self._refresh_row(path)
+        self._update_context()
 
     def _refresh_row(self, path: str) -> None:
         node = next((n for n in self.nodes if n.path == path), None)
@@ -610,6 +635,7 @@ class ResultsScreen(Screen):
         self.nodes = [n for n in self.nodes if n.path not in removed]
         self.selected -= removed
         self._rebuild_table()
+        self._update_context()
         self.query_one("#results-status", Static).update(
             f"Deleted {len(removed)} item(s). {len(self.nodes)} candidates remain."
         )
@@ -740,19 +766,23 @@ def binding_rows(bindings) -> list[tuple[str, str]]:
 
     Accepts both tuple bindings ``(key, action, description)`` and ``Binding``
     objects, so it renders whatever the screen actually declares — the help can
-    never drift from the real bindings (issue #7).
+    never drift from the real bindings (issue #7). This lists ALL bindings, including
+    those hidden from the footer (``show=False``), so Help stays complete.
     """
     rows: list[tuple[str, str]] = []
     for b in bindings:
         if isinstance(b, tuple):
             key = b[0]
             desc = b[2] if len(b) > 2 else ""
+            key_display = ""
         else:  # textual.binding.Binding
             key = getattr(b, "key", "")
             desc = getattr(b, "description", "")
+            key_display = getattr(b, "key_display", "") or ""
         if not desc:
             continue
-        rows.append((_KEY_DISPLAY.get(key, key), desc))
+        shown = key_display or _KEY_DISPLAY.get(key, key)
+        rows.append((shown, desc))
     return rows
 
 

@@ -78,6 +78,14 @@ Footer {
 }
 
 /* ---- Results screen ---- */
+#context-bar {
+    height: auto;
+    padding: 1 2;
+    margin: 1 1 0 1;
+    background: $panel;
+    color: $foreground;
+    border: round $primary;
+}
 #breadcrumb {
     height: auto;
     padding: 0 2;

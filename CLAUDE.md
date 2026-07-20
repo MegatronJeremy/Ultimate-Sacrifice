@@ -70,8 +70,16 @@ tests/              # pytest — pure logic, no GPU/network needed
 **Keep the help overlay current.** `ResultsScreen` has a `?` help modal (`HelpScreen`) that renders
 directly from the screen's `BINDINGS` via `binding_rows()`, so it never drifts — but that means the
 `description` field of every binding IS the user-facing doc. Whenever you add/change/remove a key
-binding, set a clear `description` (or omit one to hide it from help), and prefer the `_KEY_DISPLAY`
-map for friendly key names (`question_mark`→`?`).
+binding, set a clear `description` (or omit one to hide it from help), and set `key_display` for
+friendly key names (e.g. `bksp`, `?`).
+
+**Footer is curated, Help is complete.** `BINDINGS` are `Binding` objects: the footer shows only the
+~8 core task-flow keys (`show=True`: space/a/d/enter/s/f/?/esc); secondary keys (`A`/`c`/`v` bulk
+select, `backspace` drill-up, `r` rescan, `x` cancel) are `show=False` — still active, and still
+listed in `?` Help (`binding_rows` lists ALL bindings regardless of `show`). Keep the footer at a
+handful of keys as features grow; push the long tail into Help rather than bloating the footer. Above
+the table, a bordered **context bar** (`#context-bar`, `_update_context()`) shows the current root +
+item count + total size + selection totals, refreshed on scan/selection/drill.
 
 ## Conventions
 
