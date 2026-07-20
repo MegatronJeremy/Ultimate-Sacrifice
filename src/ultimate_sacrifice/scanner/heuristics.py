@@ -181,3 +181,17 @@ def annotate(node: ScanNode, now: float) -> ScanNode:
     node.junk_score = junk_score(node, now)
     node.flags = flags_for(node, now)
     return node
+
+
+_MIB = 1024 * 1024
+
+
+def drill_threshold(folder_size_bytes: int) -> int:
+    """Min-size (bytes) to use when drilling into a folder of the given aggregate size.
+
+    Auto-scales to ~1% of the folder so contents always surface while tiny noise stays
+    hidden, floored at 1 MiB so a small folder still shows something. This is what turns
+    a "large because of many small files" folder (issue #4) into individually visible,
+    actionable rows once you drill in (issue #3).
+    """
+    return max(_MIB, folder_size_bytes // 100)

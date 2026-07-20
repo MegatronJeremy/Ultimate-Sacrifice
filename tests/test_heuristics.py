@@ -95,3 +95,15 @@ def test_container_flag_in_annotate():
     nm = make(r"C:\p\node_modules", is_dir=True)
     h.annotate(nm, NOW)
     assert "container" not in nm.flags
+
+
+def test_drill_threshold_scales_and_floors():
+    MIB = 1024 * 1024
+    GIB = 1024 * MIB
+    # Large folder -> ~1% of its size.
+    assert h.drill_threshold(40 * GIB) == 40 * GIB // 100
+    # Small folder -> floored at 1 MiB so contents still surface.
+    assert h.drill_threshold(10 * MIB) == MIB
+    assert h.drill_threshold(0) == MIB
+    # Monotonic: bigger folder -> threshold never decreases.
+    assert h.drill_threshold(GIB) <= h.drill_threshold(100 * GIB)

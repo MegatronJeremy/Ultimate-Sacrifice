@@ -132,6 +132,8 @@ class ResultsScreen(Screen):
         ("v", "invert_selection", "Invert"),
         ("s", "cycle_sort", "Sort"),
         ("f", "cycle_filter", "Filter"),
+        ("enter", "drill_in", "Drill into folder"),
+        ("backspace", "drill_up", "Drill up"),
         ("d", "delete", "Delete selected"),
         ("r", "rescan", "Rescan"),
         ("x", "cancel_scan", "Cancel scan"),
@@ -151,10 +153,14 @@ class ResultsScreen(Screen):
         self._filter_mode = "all"
         self._scanner: Scanner | None = None
         self._scanning = False
+        # Drill navigation: breadcrumb of (root, min_size_bytes) frames. Frame 0 is the
+        # original scan; drilling into a folder pushes a frame, backspace pops one.
+        self._scan_stack: list[tuple[str, int]] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical():
+            yield Static("", id="breadcrumb")
             yield Static("Scanning…", id="results-status")
             yield ProgressBar(total=None, id="scan-progress", show_eta=False)
             table = DataTable(id="results-table", cursor_type="row", zebra_stripes=True)
@@ -171,28 +177,36 @@ class ResultsScreen(Screen):
         table.add_column("Junk", key="junk", width=6)
         table.add_column("AI", key="ai", width=11)  # trailing * = restored from cache
         table.add_column("Path", key="path")
+        # Seed the base scan frame from config.
+        app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
+        self._scan_stack = [(app.cfg.scan.root, app.cfg.scan.min_size_bytes)]
         self.run_scan()
 
     # ---- scanning -------------------------------------------------------
 
+    @property
+    def _current_frame(self) -> tuple[str, int]:
+        """(root, min_size_bytes) of the scan currently displayed."""
+        return self._scan_stack[-1]
+
     @work(thread=True, exclusive=True)
-    def run_scan(self) -> None:
+    def run_scan(self, preserve_all: bool = False) -> None:
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
-        cfg = app.cfg
+        root, min_bytes = self._current_frame
         self._scanning = True
 
         def on_progress(p: ScanProgress) -> None:
             app.call_from_thread(self._update_progress, p)
 
         scanner = Scanner(
-            min_size_bytes=cfg.scan.min_size_bytes,
-            top_n=cfg.scan.top_n,
+            min_size_bytes=min_bytes,
+            top_n=app.cfg.scan.top_n,
             progress_cb=on_progress,
         )
         self._scanner = scanner
-        nodes = scanner.scan(cfg.scan.root)
+        nodes = scanner.scan(root)
         self._scanning = False
-        app.call_from_thread(self._scan_done, nodes, scanner._progress.cancelled)
+        app.call_from_thread(self._scan_done, nodes, scanner._progress.cancelled, preserve_all)
 
     def action_cancel_scan(self) -> None:
         if self._scanning and self._scanner is not None:
@@ -202,7 +216,7 @@ class ResultsScreen(Screen):
     def _update_progress(self, p: ScanProgress) -> None:
         rate = int(p.entries / p.elapsed_s) if p.elapsed_s > 0 else 0
         # Show the top-level dir currently being walked, not the deep current path.
-        top = _top_level_of(p.current_path, self.app.cfg.scan.root)  # type: ignore[attr-defined]
+        top = _top_level_of(p.current_path, self._current_frame[0])
         status = self.query_one("#results-status", Static)
         status.update(
             f"[b]Scanning…[/b] {p.entries:,} entries · {human_size(p.bytes_seen)} · "
@@ -210,10 +224,16 @@ class ResultsScreen(Screen):
             f"[dim]{top}[/dim]   [b]x[/b] to cancel"
         )
 
-    def _scan_done(self, nodes: list[ScanNode], cancelled: bool = False) -> None:
-        dropped = self._reconcile_after_scan(nodes)
+    def _scan_done(
+        self, nodes: list[ScanNode], cancelled: bool = False, preserve_all: bool = False
+    ) -> None:
+        # On drill navigation we NARROW the view, so paths from other frames are absent
+        # but still valid — don't drop their selections/verdicts. Only an explicit rescan
+        # of the same root (r) reconciles against genuine disappearance.
+        dropped = 0 if preserve_all else self._reconcile_after_scan(nodes)
         self.nodes = nodes
         self.query_one("#scan-progress", ProgressBar).update(total=1, progress=1)
+        self._update_breadcrumb()
         restored = self._restore_from_cache()
         auto = self._auto_select_confident()  # tick confident deletes from cached verdicts
         self._rebuild_table()
@@ -222,11 +242,30 @@ class ResultsScreen(Screen):
         cache_note = f" [dim]{restored} restored from cache.[/dim]" if restored else ""
         auto_note = f" [b]{auto}[/b] auto-selected." if auto else ""
         drop_note = f" [dim]{dropped} prior selection(s) dropped.[/dim]" if dropped else ""
-        self.query_one("#results-status", Static).update(
-            f"{cancel_note}[b]{len(nodes)}[/b] candidates, {human_size(total)} total."
-            f"{cache_note}{auto_note}{drop_note} Press [b]a[/b] to assess, "
-            f"[b]space[/b] to select, [b]?[/b] for keys."
+        depth = len(self._scan_stack) - 1
+        _, min_bytes = self._current_frame
+        drill_note = (
+            f"[b]Drilled in[/b] (≥ {human_size(min_bytes)}, [b]backspace[/b] to go up). "
+            if depth > 0 else ""
         )
+        self.query_one("#results-status", Static).update(
+            f"{cancel_note}{drill_note}[b]{len(nodes)}[/b] candidates, {human_size(total)} total."
+            f"{cache_note}{auto_note}{drop_note} [b]enter[/b] a folder, [b]a[/b] assess, "
+            f"[b]?[/b] keys."
+        )
+
+    def _update_breadcrumb(self) -> None:
+        """Render the drill path as `root › … › current` (empty at the base frame)."""
+        crumb = self.query_one("#breadcrumb", Static)
+        if len(self._scan_stack) <= 1:
+            crumb.update("")
+            crumb.display = False
+            return
+        root = self._current_frame[0]
+        parts = [p for p in os.path.normpath(root).replace("/", "\\").split("\\") if p]
+        shown = parts if len(parts) <= 4 else ["…", *parts[-3:]]
+        crumb.update(" › ".join(shown))
+        crumb.display = True
 
     def _reconcile_after_scan(self, nodes: list[ScanNode]) -> int:
         """Keep selections/verdicts that still apply to the fresh node set.
@@ -474,6 +513,12 @@ class ResultsScreen(Screen):
                     table.update_cell(key, col, val)
                 break
 
+    @on(DataTable.RowSelected)
+    def _on_row_selected(self, _event: DataTable.RowSelected) -> None:
+        # DataTable emits RowSelected on Enter (and consumes the key), so drill-in is
+        # wired here rather than via a screen 'enter' binding that never fires.
+        self.action_drill_in()
+
     @on(DataTable.RowHighlighted)
     def show_detail(self, _event: DataTable.RowHighlighted) -> None:
         path = self._current_path()
@@ -574,6 +619,43 @@ class ResultsScreen(Screen):
         # them against the fresh node set (dropping paths that vanished or became
         # guarded/container). Cache-backed assessments also refill for unchanged files.
         self.run_scan()
+
+    def action_drill_in(self) -> None:
+        """Re-scan the highlighted directory as a new root with an auto-scaled threshold.
+
+        Files can't be drilled into. Directories (including protected containers like
+        C:\\Dev, a Downloads folder, or media dirs) can — that's how you find where the
+        space actually went and surface many-small-files that don't clear the base
+        threshold (issues #3 + #4).
+        """
+        if self._scanning:
+            return
+        path = self._current_path()
+        node = next((n for n in self.nodes if n.path == path), None)
+        if node is None:
+            return
+        if not node.is_dir:
+            self.query_one("#detail-panel", Static).update(
+                "[yellow]Can't drill into a file — only directories.[/yellow]"
+            )
+            return
+        threshold = heuristics.drill_threshold(node.size)
+        self._scan_stack.append((node.path, threshold))
+        self.query_one("#results-status", Static).update(f"Scanning {node.name}…")
+        self.run_scan(preserve_all=True)
+
+    def action_drill_up(self) -> None:
+        """Pop one drill frame and re-scan the parent view (no-op at the base frame)."""
+        if self._scanning:
+            return
+        if len(self._scan_stack) <= 1:
+            self.query_one("#detail-panel", Static).update(
+                "[dim]Already at the top of the scan.[/dim]"
+            )
+            return
+        self._scan_stack.pop()
+        self.query_one("#results-status", Static).update("Returning…")
+        self.run_scan(preserve_all=True)
 
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen(self.BINDINGS))

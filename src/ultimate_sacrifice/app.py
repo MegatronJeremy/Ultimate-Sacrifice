@@ -78,6 +78,13 @@ Footer {
 }
 
 /* ---- Results screen ---- */
+#breadcrumb {
+    height: auto;
+    padding: 0 2;
+    color: $accent;
+    text-style: bold;
+    display: none;
+}
 #results-status {
     padding: 1 2;
     height: auto;

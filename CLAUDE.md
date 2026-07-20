@@ -107,6 +107,16 @@ All deletion is centralized in `cleanup/deleter.py` behind guards; the UI must n
   `is_guarded` (a directory that is neither `is_build_artifact` nor `is_temp_path` is refused by
   path). Only recognized-disposable dirs (`node_modules`, `build/`, `Temp`, caches) and individually
   large *files* are real candidates. The **scan root itself is dropped** from candidates entirely.
+  You can still **drill into** a container (below) to see where its space went.
+- **Drill-in navigation** (`enter` on a directory row): re-scans that folder as a new root with an
+  auto-scaled threshold (`heuristics.drill_threshold` = ~1% of the folder, floored at 1 MiB), pushing
+  a breadcrumb frame; `backspace` pops back. This reuses `Scanner` unchanged — drill-in is pure
+  orchestration (`ResultsScreen._scan_stack`), no walker/dedup/heuristics changes. It's what surfaces
+  the "large because of many small files" case: those files are hidden at the base threshold but
+  become individually visible once you drill in. Selections are keyed by absolute path, so they
+  **persist across frames** — drill in, select, pop out, drill elsewhere, then delete everything at
+  once; drill navigation passes `preserve_all` so narrowing the view never drops a valid selection.
+  (`enter` reaches drill-in via `DataTable.RowSelected`, since the table consumes the Enter key.)
 - **Nested candidates are de-duplicated** (`walker.deduplicate_nested`): the walk records a directory
   *and* its qualifying children, so the same bytes would appear 2-3x (`Build` + `Build/Win64` +
   `Build/Win64/x64`). De-dup keeps only the **shallowest** node in each nested chain, but *per class*

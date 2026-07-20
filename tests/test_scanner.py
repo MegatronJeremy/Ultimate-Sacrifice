@@ -97,6 +97,32 @@ def test_progress_reports_elapsed(tmp_path):
     assert seen[-1].cancelled is False
 
 
+def test_drill_reveals_small_files_that_add_up(tmp_path):
+    # Issues #3+#4: a folder full of files each BELOW the base threshold shows only as
+    # the aggregate folder at a high threshold; drilling in (re-scan at a low threshold)
+    # surfaces the individual files.
+    from ultimate_sacrifice.scanner import heuristics
+
+    root = str(tmp_path)
+    mb = 1024 * 1024
+    blob = os.path.join(root, "cache")
+    for i in range(20):  # 20 × 3 MB = 60 MB aggregate, each file well under 50 MB
+        _write(os.path.join(blob, f"chunk{i}.dat"), 3 * mb)
+
+    # Base scan at 50 MB: no individual file qualifies; only the aggregate folder does.
+    base = Scanner(min_size_bytes=50 * mb, top_n=100).scan(root)
+    base_files = [n for n in base if n.kind is Kind.FILE]
+    assert base_files == []  # small files hidden at the high threshold
+    cache_node = next(n for n in base if n.path.endswith("cache"))
+    assert cache_node.size == 60 * mb
+
+    # Drill into the cache folder with the auto-scaled threshold.
+    threshold = heuristics.drill_threshold(cache_node.size)
+    drilled = Scanner(min_size_bytes=threshold, top_n=100).scan(cache_node.path)
+    drilled_files = [n for n in drilled if n.kind is Kind.FILE]
+    assert len(drilled_files) == 20  # now the individual chunks are visible & actionable
+
+
 def test_root_excluded_and_junk_ranks_above_container(tmp_path, monkeypatch):
     from ultimate_sacrifice.scanner import heuristics
 
