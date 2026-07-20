@@ -62,6 +62,17 @@ the confirm dialog.
 - Headless: `python -m ultimate_sacrifice --advise [--root PATH] [--no-ai]` scans, prints the map +
   plan (via `analysis/report.render_plan`), and exits — no TUI, deletes nothing. `_safe_print` guards
   against legacy Windows-console (cp1252) encode errors on the AI narrative.
+- TUI: from the results table press **`g`** to open `AdvisorScreen` (`tui/advisor.py`) — disk-map bars
+  + ranked action **cards** (an `OptionList`). `enter` on a card opens the results table
+  **pre-scanned + focused** to that group's paths and **pre-selected**, so review/delete reuses the
+  existing guards/confirm/progress (the advisor never deletes). `t` opens the full unfocused table.
+  `ResultsScreen(prescanned=, focus_paths=)` is the reuse seam — it renders handed-in nodes without
+  re-walking.
+- **Textual gotcha (learned here):** a `Screen`/`Widget` subclass must not shadow Textual internals.
+  `self._nodes` (Textual's child-widget list) and `_render()` (Textual's internal render) are taken —
+  the advisor uses `self._scan_nodes` and `_render_plan()`. Also pass custom `__init__` data as
+  **keyword** args, since `Screen(*children)` treats positionals as child widgets. Rich markup in
+  `Static.update()` is Rich markup, not Textual CSS — use a hex like `[#d4af37]`, not `[$accent]`.
 
 ## Layout
 
@@ -90,6 +101,7 @@ src/ultimate_sacrifice/
     deleter.py      # is_guarded / delete_path / delete_many(on_progress=): Recycle Bin, permanent, dry-run
   tui/
     screens.py      # ScanConfigScreen, ResultsScreen, ConfirmDeleteScreen, HelpScreen
+    advisor.py      # AdvisorScreen — disk-map bars + ranked action cards (opens from Results via 'g')
     theme.py        # Gold & Obsidian Textual theme, ASCII banner, verdict_style
 tests/              # pytest — pure logic, no GPU/network needed
 ```

@@ -178,6 +178,43 @@ Footer {
     color: $foreground;
 }
 
+/* ---- Disk Advisor screen ---- */
+#advisor-summary {
+    height: auto;
+    padding: 1 2;
+    margin: 1 1 0 1;
+    background: $panel;
+    color: $foreground;
+    border: round $primary;
+}
+#advisor-map {
+    height: auto;
+    padding: 1 2;
+    color: $foreground;
+}
+#advisor-actions-label {
+    height: auto;
+    padding: 0 2;
+    color: $primary;
+}
+#advisor-cards-wrap {
+    height: 1fr;
+    margin: 0 1;
+    border: round $primary;
+}
+#advisor-cards {
+    background: $background;
+}
+#advisor-narrative {
+    height: auto;
+    max-height: 12;
+    padding: 1 2;
+    margin: 0 1 1 1;
+    background: $surface;
+    border: round $secondary;
+    color: $foreground;
+}
+
 /* ---- Help overlay ---- */
 #help-dialog {
     grid-size: 1;

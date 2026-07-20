@@ -132,6 +132,7 @@ class ResultsScreen(Screen):
     BINDINGS = [
         Binding("space", "toggle_row", "Select", key_display="space"),
         Binding("a", "assess", "Assess", key_display="a"),
+        Binding("g", "advise", "Advisor", key_display="g"),
         Binding("d", "delete", "Delete", key_display="d"),
         Binding("enter", "drill_in", "Drill in", key_display="enter"),
         Binding("s", "cycle_sort", "Sort", key_display="s"),
@@ -147,7 +148,12 @@ class ResultsScreen(Screen):
         Binding("x", "cancel_scan", "Cancel scan", show=False),
     ]
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        prescanned: list[ScanNode] | None = None,
+        root: str | None = None,
+        focus_paths: set[str] | None = None,
+    ) -> None:
         super().__init__()
         self.nodes: list[ScanNode] = []
         self.selected: set[str] = set()
@@ -162,6 +168,11 @@ class ResultsScreen(Screen):
         # Drill navigation: breadcrumb of (root, min_size_bytes) frames. Frame 0 is the
         # original scan; drilling into a folder pushes a frame, backspace pops one.
         self._scan_stack: list[tuple[str, int]] = []
+        # When opened from the Advisor, we're handed already-scanned nodes (no re-walk);
+        # focus_paths (a group's paths) restricts the view and pre-selects them.
+        self._prescanned = prescanned
+        self._prescanned_root = root
+        self._focus_paths = focus_paths or set()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -184,8 +195,28 @@ class ResultsScreen(Screen):
         table.add_column("Junk", key="junk", width=6)
         table.add_column("AI", key="ai", width=11)  # trailing * = restored from cache
         table.add_column("Path", key="path")
-        # Seed the base scan frame from config.
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
+        if self._prescanned is not None:
+            # Opened from the Advisor: reuse the nodes, no re-walk. Filter to the focus
+            # group's paths (if any) and pre-select them for review/delete.
+            root = self._prescanned_root or app.cfg.scan.root
+            self._scan_stack = [(root, app.cfg.scan.min_size_bytes)]
+            if self._focus_paths:
+                self.nodes = [n for n in self._prescanned if n.path in self._focus_paths]
+                self.selected = {n.path for n in self.nodes if self._selectable(n)}
+            else:
+                self.nodes = list(self._prescanned)
+            self._restore_from_cache()
+            self._auto_select_confident()
+            self._rebuild_table()
+            self._update_context()
+            total = sum(n.size for n in self.nodes)
+            self.query_one("#results-status", Static).update(
+                f"[b]{len(self.nodes)}[/b] items · {human_size(total)} · "
+                f"[b]{len(self.selected)}[/b] pre-selected. [b]d[/b] to delete, [b]?[/b] for keys."
+            )
+            return
+        # Normal flow: seed the base scan frame from config and walk.
         self._scan_stack = [(app.cfg.scan.root, app.cfg.scan.min_size_bytes)]
         self.run_scan()
 
@@ -692,6 +723,14 @@ class ResultsScreen(Screen):
         self._scan_stack.pop()
         self.query_one("#results-status", Static).update("Returning…")
         self.run_scan(preserve_all=True)
+
+    def action_advise(self) -> None:
+        """Open the Disk Advisor over the current scan — map + prioritized plan."""
+        if self._scanning or not self.nodes:
+            return
+        from .advisor import AdvisorScreen
+
+        self.app.push_screen(AdvisorScreen(nodes=list(self.nodes), root=self._current_frame[0]))
 
     def action_help(self) -> None:
         self.app.push_screen(HelpScreen(self.BINDINGS))
