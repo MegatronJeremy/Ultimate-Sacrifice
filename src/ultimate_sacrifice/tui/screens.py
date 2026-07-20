@@ -30,7 +30,7 @@ from ..config import human_size
 from ..scanner import heuristics
 from ..scanner.model import ScanNode, ScanProgress
 from ..scanner.walker import Scanner
-from .theme import BANNER, TAGLINE, verdict_style
+from .theme import BANNER, GOLD as _GOLD, SELECTED_BG as _SELECTED_BG, TAGLINE, verdict_style
 
 if TYPE_CHECKING:
     from ..app import UltimateSacrificeApp
@@ -395,14 +395,26 @@ class ResultsScreen(Screen):
         from rich.text import Text
 
         container = heuristics.is_container(node)
-        sel = "—" if container else ("[x]" if node.path in self.selected else "[ ]")
+        selected = node.path in self.selected
+        # NOTE: cells must be Text objects, not raw strings — a plain "[x]" is parsed as
+        # console markup and renders as nothing. Text() is shown literally.
+        if container:
+            sel_cell = Text("—", style=verdict_style("container"))
+        elif selected:
+            sel_cell = Text("✓", style=f"bold {_GOLD}")
+        else:
+            sel_cell = Text("·", style="dim")
+
         age_days = 0.0
         # derive age lazily from mtime for display
         import time
 
         if node.mtime > 0:
             age_days = max(0.0, (time.time() - max(node.mtime, node.atime)) / 86400.0)
-        age = f"{age_days:.0f}d" if age_days else "-"
+        age = Text(f"{age_days:.0f}d" if age_days else "-")
+        size_cell = Text(human_size(node.size))
+        junk_cell = Text(f"{node.junk_score:.2f}")
+        path_cell = Text(node.path)
         if container:
             cat_cell = Text("container", style=verdict_style("container"))
             ai_cell = Text("protected", style=verdict_style("protected"))
@@ -417,15 +429,13 @@ class ResultsScreen(Screen):
                 )
             else:
                 ai_cell = Text("-")
-        return (
-            sel,
-            human_size(node.size),
-            age,
-            cat_cell,
-            f"{node.junk_score:.2f}",
-            ai_cell,
-            node.path,
-        )
+
+        cells = (sel_cell, size_cell, age, cat_cell, junk_cell, ai_cell, path_cell)
+        # Tint the whole row so a selection stands out even when the cursor is elsewhere.
+        if selected:
+            for c in cells:
+                c.stylize(f"on {_SELECTED_BG}")
+        return cells
 
     def _current_path(self) -> str | None:
         table = self.query_one("#results-table", DataTable)

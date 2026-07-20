@@ -13,13 +13,24 @@ from textual.theme import Theme
 
 # Palette (locked with the user): obsidian ground, parchment text, regal gold,
 # moss for "keep", crimson for danger.
-_OBSIDIAN = "#0a0a0f"
-_PARCHMENT = "#e8dcc0"
-_GOLD = "#d4af37"
-_GOLD_DIM = "#8a6d3b"
-_MOSS = "#6b8e5a"
-_CRIMSON = "#b3242b"
-_MAUVE_DIM = "#6c6478"
+OBSIDIAN = "#0a0a0f"
+PARCHMENT = "#e8dcc0"
+GOLD = "#d4af37"
+GOLD_DIM = "#8a6d3b"
+MOSS = "#6b8e5a"
+CRIMSON = "#b3242b"
+MAUVE_DIM = "#6c6478"
+# Subtle dark-gold tint for a selected table row (stands out on obsidian without glare).
+SELECTED_BG = "#2a2410"
+
+# Backwards-friendly private aliases used within this module.
+_OBSIDIAN = OBSIDIAN
+_PARCHMENT = PARCHMENT
+_GOLD = GOLD
+_GOLD_DIM = GOLD_DIM
+_MOSS = MOSS
+_CRIMSON = CRIMSON
+_MAUVE_DIM = MAUVE_DIM
 
 ULTIMATE_SACRIFICE_THEME = Theme(
     name="ultimate-sacrifice",
