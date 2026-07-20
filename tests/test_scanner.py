@@ -72,6 +72,31 @@ def test_cancel_stops_scan(tmp_path):
     assert nodes == []
 
 
+def test_cancel_sets_progress_cancelled_flag(tmp_path):
+    # Issue #5: a cancelled walk reports cancelled=True on the final progress emit.
+    root = str(tmp_path)
+    for i in range(5):
+        _write(os.path.join(root, f"f{i}.bin"), 2 * 1024 * 1024)
+
+    seen = []
+    scanner = Scanner(min_size_bytes=1, top_n=100, progress_cb=seen.append)
+    scanner.cancel = True
+    scanner.scan(root)
+    assert seen, "expected at least one progress emit"
+    assert seen[-1].cancelled is True
+    assert seen[-1].done is True
+
+
+def test_progress_reports_elapsed(tmp_path):
+    root = str(tmp_path)
+    _write(os.path.join(root, "a.bin"), 2 * 1024 * 1024)
+    seen = []
+    Scanner(min_size_bytes=1, top_n=100, progress_cb=seen.append).scan(root)
+    # Final emit carries a non-negative elapsed time and is not marked cancelled.
+    assert seen[-1].elapsed_s >= 0.0
+    assert seen[-1].cancelled is False
+
+
 def test_root_excluded_and_junk_ranks_above_container(tmp_path, monkeypatch):
     from ultimate_sacrifice.scanner import heuristics
 

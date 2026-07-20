@@ -85,22 +85,26 @@ class Scanner:
         self._progress_every = max(1, progress_every)
         self.cancel = False
         self._progress = ScanProgress()
+        self._started_at = 0.0
 
     def _emit(self, force: bool = False) -> None:
         if self._progress_cb is None:
             return
         if force or self._progress.entries % self._progress_every == 0:
+            if self._started_at:
+                self._progress.elapsed_s = time.time() - self._started_at
             self._progress_cb(self._progress)
 
     def scan(self, root: str) -> list[ScanNode]:
         root = os.path.abspath(os.path.expanduser(root))
         now = time.time()
+        self._started_at = now
         candidates: list[ScanNode] = []
 
         try:
             self._walk(root, now, candidates)
         except ScanCancelled:
-            pass
+            self._progress.cancelled = True
 
         self._progress.done = True
         self._emit(force=True)

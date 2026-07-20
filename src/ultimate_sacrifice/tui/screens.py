@@ -49,6 +49,25 @@ _SORT_MODES = ("size", "verdict", "junk", "age")
 _FILTER_MODES = ("all", "deletes", "review", "unassessed")
 
 
+def _top_level_of(current: str, root: str) -> str:
+    """The first path segment of ``current`` below ``root``, for a stable progress label.
+
+    Walking deep trees, the raw current_path flickers; showing "which top-level folder
+    under the root are we in" is calmer and more informative. Falls back to a truncated
+    current path if it isn't under root.
+    """
+    if not current:
+        return ""
+    cn = os.path.normcase(os.path.normpath(current))
+    rn = os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(root))))
+    if cn.startswith(rn):
+        rest = cn[len(rn):].lstrip("\\/")
+        if rest:
+            return rest.split("\\", 1)[0].split("/", 1)[0]
+        return "…"
+    return current[-48:]
+
+
 class ScanConfigScreen(Screen):
     """First screen: choose root, threshold, provider, and options."""
 
@@ -115,6 +134,7 @@ class ResultsScreen(Screen):
         ("f", "cycle_filter", "Filter"),
         ("d", "delete", "Delete selected"),
         ("r", "rescan", "Rescan"),
+        ("x", "cancel_scan", "Cancel scan"),
         ("question_mark", "help", "Help"),
         ("escape", "back", "Back"),
     ]
@@ -129,6 +149,8 @@ class ResultsScreen(Screen):
         self._display: list[ScanNode] = []
         self._sort_mode = "size"
         self._filter_mode = "all"
+        self._scanner: Scanner | None = None
+        self._scanning = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -157,6 +179,7 @@ class ResultsScreen(Screen):
     def run_scan(self) -> None:
         app: UltimateSacrificeApp = self.app  # type: ignore[assignment]
         cfg = app.cfg
+        self._scanning = True
 
         def on_progress(p: ScanProgress) -> None:
             app.call_from_thread(self._update_progress, p)
@@ -168,16 +191,26 @@ class ResultsScreen(Screen):
         )
         self._scanner = scanner
         nodes = scanner.scan(cfg.scan.root)
-        app.call_from_thread(self._scan_done, nodes)
+        self._scanning = False
+        app.call_from_thread(self._scan_done, nodes, scanner._progress.cancelled)
+
+    def action_cancel_scan(self) -> None:
+        if self._scanning and self._scanner is not None:
+            self._scanner.cancel = True
+            self.query_one("#results-status", Static).update("Cancelling scan…")
 
     def _update_progress(self, p: ScanProgress) -> None:
+        rate = int(p.entries / p.elapsed_s) if p.elapsed_s > 0 else 0
+        # Show the top-level dir currently being walked, not the deep current path.
+        top = _top_level_of(p.current_path, self.app.cfg.scan.root)  # type: ignore[attr-defined]
         status = self.query_one("#results-status", Static)
         status.update(
-            f"Scanning… {p.entries:,} entries, {human_size(p.bytes_seen)} seen, "
-            f"{p.errors} skipped — {p.current_path[:70]}"
+            f"[b]Scanning…[/b] {p.entries:,} entries · {human_size(p.bytes_seen)} · "
+            f"{p.elapsed_s:.0f}s · {rate:,}/s · {p.errors} skipped   "
+            f"[dim]{top}[/dim]   [b]x[/b] to cancel"
         )
 
-    def _scan_done(self, nodes: list[ScanNode]) -> None:
+    def _scan_done(self, nodes: list[ScanNode], cancelled: bool = False) -> None:
         dropped = self._reconcile_after_scan(nodes)
         self.nodes = nodes
         self.query_one("#scan-progress", ProgressBar).update(total=1, progress=1)
@@ -185,12 +218,14 @@ class ResultsScreen(Screen):
         auto = self._auto_select_confident()  # tick confident deletes from cached verdicts
         self._rebuild_table()
         total = sum(n.size for n in nodes)
+        cancel_note = "[yellow]Scan cancelled — partial results.[/yellow] " if cancelled else ""
         cache_note = f" [dim]{restored} restored from cache.[/dim]" if restored else ""
         auto_note = f" [b]{auto}[/b] auto-selected." if auto else ""
         drop_note = f" [dim]{dropped} prior selection(s) dropped.[/dim]" if dropped else ""
         self.query_one("#results-status", Static).update(
-            f"[b]{len(nodes)}[/b] candidates, {human_size(total)} total.{cache_note}{auto_note}"
-            f"{drop_note} Press [b]a[/b] to assess, [b]space[/b] to select, [b]?[/b] for keys."
+            f"{cancel_note}[b]{len(nodes)}[/b] candidates, {human_size(total)} total."
+            f"{cache_note}{auto_note}{drop_note} Press [b]a[/b] to assess, "
+            f"[b]space[/b] to select, [b]?[/b] for keys."
         )
 
     def _reconcile_after_scan(self, nodes: list[ScanNode]) -> int:

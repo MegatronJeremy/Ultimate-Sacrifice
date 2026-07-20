@@ -51,3 +51,5 @@ class ScanProgress:
     current_path: str = ""
     errors: int = 0
     done: bool = False
+    elapsed_s: float = 0.0  # wall-clock seconds since the scan started
+    cancelled: bool = False  # True if the walk stopped early via Scanner.cancel
