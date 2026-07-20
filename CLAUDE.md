@@ -62,9 +62,16 @@ src/ultimate_sacrifice/
   cleanup/
     deleter.py      # is_guarded / delete_path / delete_many: Recycle Bin, permanent, dry-run
   tui/
-    screens.py      # ScanConfigScreen, ResultsScreen, ConfirmDeleteScreen
+    screens.py      # ScanConfigScreen, ResultsScreen, ConfirmDeleteScreen, HelpScreen
+    theme.py        # Gold & Obsidian Textual theme, ASCII banner, verdict_style
 tests/              # pytest — pure logic, no GPU/network needed
 ```
+
+**Keep the help overlay current.** `ResultsScreen` has a `?` help modal (`HelpScreen`) that renders
+directly from the screen's `BINDINGS` via `binding_rows()`, so it never drifts — but that means the
+`description` field of every binding IS the user-facing doc. Whenever you add/change/remove a key
+binding, set a clear `description` (or omit one to hide it from help), and prefer the `_KEY_DISPLAY`
+map for friendly key names (`question_mark`→`?`).
 
 ## Conventions
 

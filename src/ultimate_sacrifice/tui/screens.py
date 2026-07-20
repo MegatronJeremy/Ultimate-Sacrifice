@@ -38,6 +38,16 @@ if TYPE_CHECKING:
 # pre-selected for you; everything else is left for a manual decision.
 _AUTO_SELECT_CONFIDENCE = 0.85
 
+# Sort modes cycled with 's'. Each is (label, key(node) -> sortable). All sort
+# descending except name/age where ascending reads more naturally; we handle that
+# per-mode in _apply_view. Containers are always forced last regardless of sort.
+_REC_RANK = {"delete": 0, "review": 1, "keep": 2, None: 3}
+
+_SORT_MODES = ("size", "verdict", "junk", "age")
+
+# Filter modes cycled with 'f': predicate over (node, assessment|None).
+_FILTER_MODES = ("all", "deletes", "review", "unassessed")
+
 
 class ScanConfigScreen(Screen):
     """First screen: choose root, threshold, provider, and options."""
@@ -98,8 +108,14 @@ class ResultsScreen(Screen):
     BINDINGS = [
         ("space", "toggle_row", "Select"),
         ("a", "assess", "Assess with AI"),
+        ("A", "select_recommended", "Select all deletes"),
+        ("c", "clear_selection", "Clear"),
+        ("v", "invert_selection", "Invert"),
+        ("s", "cycle_sort", "Sort"),
+        ("f", "cycle_filter", "Filter"),
         ("d", "delete", "Delete selected"),
         ("r", "rescan", "Rescan"),
+        ("question_mark", "help", "Help"),
         ("escape", "back", "Back"),
     ]
 
@@ -109,6 +125,10 @@ class ResultsScreen(Screen):
         self.selected: set[str] = set()
         self.assessments: dict[str, Assessment] = {}
         self._row_to_path: dict[object, str] = {}
+        # Display view = ordered/filtered subset of self.nodes that the table renders.
+        self._display: list[ScanNode] = []
+        self._sort_mode = "size"
+        self._filter_mode = "all"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -158,6 +178,7 @@ class ResultsScreen(Screen):
         )
 
     def _scan_done(self, nodes: list[ScanNode]) -> None:
+        dropped = self._reconcile_after_scan(nodes)
         self.nodes = nodes
         self.query_one("#scan-progress", ProgressBar).update(total=1, progress=1)
         restored = self._restore_from_cache()
@@ -166,10 +187,29 @@ class ResultsScreen(Screen):
         total = sum(n.size for n in nodes)
         cache_note = f" [dim]{restored} restored from cache.[/dim]" if restored else ""
         auto_note = f" [b]{auto}[/b] auto-selected." if auto else ""
+        drop_note = f" [dim]{dropped} prior selection(s) dropped.[/dim]" if dropped else ""
         self.query_one("#results-status", Static).update(
-            f"[b]{len(nodes)}[/b] candidates, {human_size(total)} total.{cache_note}{auto_note} "
-            f"Press [b]a[/b] to assess with AI, [b]space[/b] to select, [b]d[/b] to delete."
+            f"[b]{len(nodes)}[/b] candidates, {human_size(total)} total.{cache_note}{auto_note}"
+            f"{drop_note} Press [b]a[/b] to assess, [b]space[/b] to select, [b]?[/b] for keys."
         )
+
+    def _reconcile_after_scan(self, nodes: list[ScanNode]) -> int:
+        """Keep selections/verdicts that still apply to the fresh node set.
+
+        A prior selection survives only if the path is still a candidate and is still
+        selectable (not newly guarded/container). Verdicts for paths that vanished are
+        dropped so stale rows don't linger. Returns how many selections were dropped.
+        """
+        by_path = {n.path: n for n in nodes}
+        kept_sel: set[str] = set()
+        for path in self.selected:
+            node = by_path.get(path)
+            if node is not None and self._selectable(node):
+                kept_sel.add(path)
+        dropped = len(self.selected) - len(kept_sel)
+        self.selected = kept_sel
+        self.assessments = {p: a for p, a in self.assessments.items() if p in by_path}
+        return dropped
 
     def _restore_from_cache(self) -> int:
         """Pre-fill assessments for unchanged files from the persistent cache."""
@@ -211,13 +251,48 @@ class ResultsScreen(Screen):
             newly += 1
         return newly
 
+    def _apply_view(self) -> None:
+        """Recompute the ordered/filtered display list from nodes + sort/filter state."""
+
+        def passes(node: ScanNode) -> bool:
+            if self._filter_mode == "all":
+                return True
+            a = self.assessments.get(node.path)
+            if self._filter_mode == "deletes":
+                return a is not None and a.recommendation == "delete"
+            if self._filter_mode == "review":
+                return a is not None and a.recommendation == "review"
+            if self._filter_mode == "unassessed":
+                # Containers are never assessed; don't count them as "unassessed" clutter.
+                return a is None and not heuristics.is_container(node)
+            return True
+
+        def sort_key(node: ScanNode):
+            # Containers always sink to the bottom, matching the scanner's own ranking.
+            container = heuristics.is_container(node)
+            if self._sort_mode == "size":
+                return (container, -node.size)
+            if self._sort_mode == "junk":
+                return (container, -node.junk_score)
+            if self._sort_mode == "age":
+                age = max(node.mtime, node.atime)
+                return (container, age)  # oldest first (smallest timestamp)
+            if self._sort_mode == "verdict":
+                a = self.assessments.get(node.path)
+                rank = _REC_RANK[a.recommendation if a else None]
+                return (container, rank, -node.size)
+            return (container, -node.size)
+
+        self._display = sorted((n for n in self.nodes if passes(n)), key=sort_key)
+
     def _rebuild_table(self) -> None:
+        self._apply_view()
         table = self.query_one("#results-table", DataTable)
         table.clear()
         self._row_to_path.clear()
-        for node in self.nodes:
-            key = table.add_row(*self._row_cells(node))
-            self._row_to_path[key.value if hasattr(key, "value") else key] = node.path
+        for node in self._display:
+            key = table.add_row(*self._row_cells(node))  # RowKey; use as-is for update_cell
+            self._row_to_path[key] = node.path
 
     def _row_cells(self, node: ScanNode) -> tuple:
         from rich.text import Text
@@ -263,7 +338,72 @@ class ResultsScreen(Screen):
             row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
         except Exception:
             return None
-        return self._row_to_path.get(row_key.value if hasattr(row_key, "value") else row_key)
+        return self._row_to_path.get(row_key)
+
+    # ---- sort / filter --------------------------------------------------
+
+    def action_cycle_sort(self) -> None:
+        i = _SORT_MODES.index(self._sort_mode)
+        self._sort_mode = _SORT_MODES[(i + 1) % len(_SORT_MODES)]
+        self._rebuild_table()
+        self._update_view_status()
+
+    def action_cycle_filter(self) -> None:
+        i = _FILTER_MODES.index(self._filter_mode)
+        self._filter_mode = _FILTER_MODES[(i + 1) % len(_FILTER_MODES)]
+        self._rebuild_table()
+        self._update_view_status()
+
+    def _update_view_status(self) -> None:
+        shown = len(self._display)
+        sel_bytes = sum(n.size for n in self.nodes if n.path in self.selected)
+        self.query_one("#results-status", Static).update(
+            f"Sort: [b]{self._sort_mode}[/b]  ·  Filter: [b]{self._filter_mode}[/b]  ·  "
+            f"showing [b]{shown}[/b]/{len(self.nodes)}  ·  selected [b]{len(self.selected)}[/b] "
+            f"({human_size(sel_bytes)}). [b]?[/b] for keys."
+        )
+
+    # ---- bulk selection -------------------------------------------------
+
+    def _selectable(self, node: ScanNode) -> bool:
+        """True if a node may be selected (not a container, not a guarded path)."""
+        if heuristics.is_container(node):
+            return False
+        return not is_guarded(node.path)[0]
+
+    def action_select_recommended(self) -> None:
+        """Select every AI 'delete' verdict (any confidence), skipping guarded/containers."""
+        added = 0
+        for node in self.nodes:
+            if node.path in self.selected or not self._selectable(node):
+                continue
+            a = self.assessments.get(node.path)
+            if a is not None and a.recommendation == "delete":
+                self.selected.add(node.path)
+                added += 1
+        self._refresh_all_visible()
+        self._update_view_status()
+
+    def action_clear_selection(self) -> None:
+        self.selected.clear()
+        self._refresh_all_visible()
+        self._update_view_status()
+
+    def action_invert_selection(self) -> None:
+        """Invert selection among selectable nodes only (containers/guarded stay off)."""
+        for node in self.nodes:
+            if not self._selectable(node):
+                continue
+            if node.path in self.selected:
+                self.selected.discard(node.path)
+            else:
+                self.selected.add(node.path)
+        self._refresh_all_visible()
+        self._update_view_status()
+
+    def _refresh_all_visible(self) -> None:
+        for path in list(self._row_to_path.values()):
+            self._refresh_row(path)
 
     # ---- interactions ---------------------------------------------------
 
@@ -395,9 +535,13 @@ class ResultsScreen(Screen):
         )
 
     def action_rescan(self) -> None:
-        self.selected.clear()
-        self.assessments.clear()
+        # Keep manual selections and verdicts across a rescan; _scan_done reconciles
+        # them against the fresh node set (dropping paths that vanished or became
+        # guarded/container). Cache-backed assessments also refill for unchanged files.
         self.run_scan()
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpScreen(self.BINDINGS))
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -464,3 +608,53 @@ class ConfirmDeleteScreen(ModalScreen):
         )
         deleted = [r.path for r in results if r.ok]
         app.call_from_thread(self.dismiss, deleted)
+
+
+# Friendlier display names for special key identifiers used in BINDINGS.
+_KEY_DISPLAY = {
+    "question_mark": "?",
+    "space": "space",
+    "escape": "esc",
+}
+
+
+def binding_rows(bindings) -> list[tuple[str, str]]:
+    """Flatten a Textual BINDINGS list into (key, description) pairs.
+
+    Accepts both tuple bindings ``(key, action, description)`` and ``Binding``
+    objects, so it renders whatever the screen actually declares — the help can
+    never drift from the real bindings (issue #7).
+    """
+    rows: list[tuple[str, str]] = []
+    for b in bindings:
+        if isinstance(b, tuple):
+            key = b[0]
+            desc = b[2] if len(b) > 2 else ""
+        else:  # textual.binding.Binding
+            key = getattr(b, "key", "")
+            desc = getattr(b, "description", "")
+        if not desc:
+            continue
+        rows.append((_KEY_DISPLAY.get(key, key), desc))
+    return rows
+
+
+class HelpScreen(ModalScreen):
+    """Modal overlay listing keyboard shortcuts, rendered from a screen's BINDINGS."""
+
+    BINDINGS = [("escape", "dismiss", "Close"), ("question_mark", "dismiss", "Close")]
+
+    def __init__(self, source_bindings) -> None:
+        super().__init__()
+        self._rows = binding_rows(source_bindings)
+
+    def compose(self) -> ComposeResult:
+        with Grid(id="help-dialog"):
+            yield Label("[b]Keyboard & Mouse Shortcuts[/b]", id="help-title")
+            with VerticalScroll(id="help-list"):
+                for key, desc in self._rows:
+                    yield Static(f"  [b]{key:<8}[/b]  {desc}")
+            yield Static("[dim]Press ? or Esc to close.[/dim]", id="help-footer")
+
+    def action_dismiss(self) -> None:
+        self.dismiss(None)

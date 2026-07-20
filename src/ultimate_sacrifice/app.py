@@ -145,6 +145,31 @@ Footer {
 #confirm-buttons Button {
     margin-right: 2;
 }
+
+/* ---- Help overlay ---- */
+#help-dialog {
+    grid-size: 1;
+    grid-rows: auto 1fr auto;
+    padding: 1 2;
+    width: 64;
+    max-width: 100%;
+    height: auto;
+    max-height: 90%;
+    border: heavy $primary;
+    background: $surface;
+}
+#help-title {
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+#help-list {
+    height: auto;
+    max-height: 20;
+}
+#help-footer {
+    margin-top: 1;
+}
 """
 
 

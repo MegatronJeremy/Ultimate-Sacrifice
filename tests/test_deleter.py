@@ -20,6 +20,31 @@ def test_system_paths_guarded():
         assert reason
 
 
+def test_system_paths_guarded_on_any_drive():
+    # Guards must apply drive-relative, not only on C: (issue #6).
+    for p in (
+        r"D:\Windows",
+        r"D:\Windows\System32",
+        r"E:\Program Files\app",
+        r"D:\Program Files (x86)\x",
+        r"F:\ProgramData\y",
+        r"D:\$Recycle.Bin",
+        r"G:\System Volume Information",
+    ):
+        guarded, reason = is_guarded(p)
+        assert guarded, p
+        assert reason
+
+
+def test_non_system_dir_on_other_drive_not_guarded(tmp_path):
+    # A normal top-level dir on a non-C drive is NOT guarded just for being top-level.
+    # (Use a fake path; is_guarded's container check only triggers for existing dirs.)
+    guarded, _ = is_guarded(r"D:\Projects\myrepo\node_modules")
+    assert not guarded  # node_modules is recognized junk
+    guarded, _ = is_guarded(r"D:\Downloads\big.iso")
+    assert not guarded  # a loose file is not a system dir
+
+
 def test_normal_path_not_guarded(tmp_path):
     guarded, _ = is_guarded(str(tmp_path / "junk"))
     assert not guarded

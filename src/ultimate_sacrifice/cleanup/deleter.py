@@ -14,14 +14,15 @@ from os.path import abspath, normcase, normpath
 
 from send2trash import send2trash
 
-# Path prefixes we never delete, even if the AI says so.
-_GUARDED_PREFIXES = (
-    "c:\\windows",
-    "c:\\program files",
-    "c:\\program files (x86)",
-    "c:\\programdata",
-    "c:\\$recycle.bin",
-    "c:\\system volume information",
+# Top-level directory names we never delete, on ANY drive (e.g. both C:\Windows and
+# D:\Windows). Matched drive-relative so multi-drive systems are covered, not just C:.
+_GUARDED_TOP_DIRS = (
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
 )
 
 # OS-managed swap / hibernation files — deleting these breaks or destabilizes Windows.
@@ -56,6 +57,21 @@ def is_drive_root(path: str) -> bool:
     return len(n) <= 3 and n[1:2] == ":"
 
 
+def _top_dir_relative(norm_path: str) -> str | None:
+    """First path segment below a drive root, lowercased. None if not a drive path.
+
+    ``C:\\Windows\\System32`` -> ``windows``; ``D:\\Program Files\\x`` -> ``program files``.
+    Lets us guard system dirs on any drive, not just C:. Expects an already-normalized
+    (``_norm``) path.
+    """
+    if len(norm_path) < 3 or norm_path[1:3] != ":\\":
+        return None  # not a "<drive>:\..." path (e.g. a UNC share) — no drive-relative top
+    rest = norm_path[3:]
+    if not rest:
+        return None
+    return rest.split("\\", 1)[0]
+
+
 def is_guarded(path: str) -> tuple[bool, str]:
     """Return (guarded, reason). Guarded paths must never be deleted."""
     n = _norm(path)
@@ -66,9 +82,9 @@ def is_guarded(path: str) -> tuple[bool, str]:
         return True, f"refusing to delete an OS swap/hibernation file ({base})"
     if os.path.splitext(base)[1] in _GUARDED_EXTENSIONS:
         return True, "refusing to delete a virtual-disk image (contains an entire filesystem)"
-    for pref in _GUARDED_PREFIXES:
-        if n == pref or n.startswith(pref + "\\"):
-            return True, f"refusing to delete a protected system path ({pref})"
+    top = _top_dir_relative(n)
+    if top is not None and top in _GUARDED_TOP_DIRS:
+        return True, f"refusing to delete a protected system path ({top})"
     # Refuse to delete the app's own install/source directory.
     try:
         app_root = _norm(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
